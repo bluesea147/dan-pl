@@ -22,6 +22,14 @@
 
 ;; Problem 1
 
+(define (racketlist->mupllist rlst)
+  (if (pair? rlst) (apair (car rlst) (racketlist->mupllist (cdr rlst))) (aunit)))
+
+(define (mupllist->racketlist mlst)
+  (if (apair? mlst) (cons (apair-e1 mlst) (mupllist->racketlist (apair-e2 mlst))) null))
+
+
+
 ;; CHANGE (put your solutions here)
 
 ;; Problem 2
@@ -49,6 +57,54 @@
                        (int-num v2)))
                (error "MUPL addition applied to non-number")))]
         ;; CHANGE add more cases here
+        ;; 简单来说, 不用检查语法, 肯定是会evaluate成value, 但
+        ;; 是否正确类型的value出现在正确的位置, 需要检查. 
+        [(int? e) e]
+        [(closure? e) e]
+        [(aunit? e) e]
+        [(fun? e) 
+           (closure env e)]
+        [(ifgreater? e)
+         (let ([v1 (eval-under-env (ifgreater-e1 e) env)]
+               [v2 (eval-under-env (ifgreater-e2 e) env)])
+           (if (and (int? v1) (int? v2))
+               (if (> (int-num v1) (int-num v2))
+                   (eval-under-env (ifgreater-e3 e) env)
+                   (eval-under-env (ifgreater-e4 e) env))
+               (error "ifgreater e1 e2 non-number")))]
+        [(mlet? e)
+         (let ([v1 (eval-under-env (mlet-e e) env)])
+           (eval-under-env (mlet-body e) 
+                           (cons (cons (mlet-var e) v1) 
+                                 env)))]
+        [(call? e)
+         (let ([cl (eval-under-env (call-funexp e) env)]
+               [actual-arg (eval-under-env (call-actual e) env)]
+               )
+           (if (closure? cl)
+               (let* ([fn (closure-fun cl)]
+                      [arg-name (fun-formal fn)]
+                      [fn-name (fun-nameopt fn)]
+                      [eva-env (cons (cons fn-name cl) ; fn-name = #f ?
+                                     (cons (cons arg-name actual-arg) 
+                                           (closure-env cl)))]) 
+                 (eval-under-env (fun-body fn) eva-env))
+               (error "first expression of call is not closure")))]
+        [(apair? e)
+         (let ([v1 (eval-under-env (apair-e1 e) env)]
+               [v2 (eval-under-env (apair-e2 e) env)])
+           (apair v1 v2))]
+        [(fst? e)
+         (let ([v (eval-under-env (fst-e e) env)])
+           (if (apair? v) (apair-e1 v)
+               (error "apply non-apair to fst")))]
+        [(snd? e)
+         (let ([v (eval-under-env (snd-e e) env)])
+           (if (apair? v) (apair-e2 v)
+               (error "apply non-apair to snd")))]
+        [(isaunit? e)
+         (if (aunit? (eval-under-env (isaunit-e e) env)) (int 1)
+             (int 0))]
         [#t (error (format "bad MUPL expression: ~v" e))]))
 
 ;; Do NOT change
@@ -57,19 +113,40 @@
         
 ;; Problem 3
 
-(define (ifaunit e1 e2 e3) "CHANGE")
+(define (ifaunit e1 e2 e3) 
+  (ifgreater (isaunit e1) (int 0) e2 e3)
+  )
 
-(define (mlet* lstlst e2) "CHANGE")
+;; use closure to implement
+(define (mlet* lstlst e2) 
+  (if (null? lstlst) e2
+      (let* ([p (car lstlst)]
+             [var-name (car p)]
+             [var-val (cdr p)])
+        (mlet var-name var-val (mlet* (cdr lstlst) e2)))))
 
-(define (ifeq e1 e2 e3 e4) "CHANGE")
+; asume none of expression use _x or _y variable name
+; to make sure e1 e2 are evaluated exactly once
+(define (ifeq e1 e2 e3 e4) 
+  (mlet* (list (cons "_x" e1) (cons "_y" e2))
+         (let* ([x (var "_x")]
+                [y (var "_y")])
+           (ifgreater x y e4 (ifgreater y x e4 e3)))))
 
 ;; Problem 4
 
-(define mupl-map "CHANGE")
+(define mupl-map 
+  (fun #f "f" 
+       (fun "mapped" "lst"
+            ;; todo: add if null的情况: (ifaunit (var "lst"))
+            (ifaunit (var "lst") (aunit) 
+                     (apair (call (var "f") (fst (var "lst")))
+                            (call (var "mapped") (snd (var "lst"))))))))
 
 (define mupl-mapAddN 
   (mlet "map" mupl-map
-        "CHANGE (notice map is now in MUPL scope)"))
+        (fun #f "added" (call (var "map") 
+                              (fun #f "toadd" (add (var "toadd") (var "added")))))))
 
 ;; Challenge Problem
 
@@ -77,7 +154,32 @@
 
 ;; We will test this function directly, so it must do
 ;; as described in the assignment
-(define (compute-free-vars e) "CHANGE")
+(define (compute-free-vars e) 
+  (define (compute-used e) 
+    (cond [(var? e) (set (var-string e))]
+          [(add? e) (set-union (compute-used (add-e1 e))
+                               (compute-used (add-e2 e)))]
+          [(apair? e) (set-union (compute-used (apair-e1 e))
+                                 (compute-used (apair-e2 e)))]
+          [(fst? e) (compute-used (fst-e e))]
+          [(snd? e) (compute-used (snd-e e))]
+          [(isaunit? e) (compute-used (isaunit-e e))]
+          ;at call site, don't consider callee's used variables, that's responsible
+          ;by function definition's environment
+          [(call? e) (compute-used (call-actual e))]
+          [(ifgreater? e) (set-union (compute-used (ifgreater-e1 e))
+                                     (compute-used (ifgreater-e2 e))
+                                     (compute-used (ifgreater-e3 e))
+                                     (compute-used (ifgreater-e4 e)))]
+          [(fun-challenge? e) (compute-used (fun-challenge-body e))]
+          [(mlet? e) (set-union (compute-used (mlet-e e)) (compute-used (mlet-body e)))]
+          [#t (error "unexpected expression of interpreted language")]
+          ))
+  ;TODO:here
+  (define (compute-shadow e) 2)
+  (let* ([used (compute-used e)]
+         [shadow (compute-shadow e)])
+    (set-remove used shadow)))
 
 ;; Do NOT share code with eval-under-env because that will make
 ;; auto-grading and peer assessment more difficult, so
