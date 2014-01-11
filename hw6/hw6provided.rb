@@ -95,6 +95,7 @@ end
 class Board
 
   def initialize (game)
+    #Array.new(size), intialize all elem to nil, which is used to stand for 
     @grid = Array.new(num_rows) {Array.new(num_columns)}
     @current_block = Piece.next_piece(self)
     @score = 0
@@ -206,7 +207,14 @@ class Board
 
   # gets the information from the current piece about where it is and uses this
   # to store the piece on the board itself.  Then calls remove_filled.
+
+  #comments by jianfei hu
+  #this function is buggy: it assumes @current_rotation has 4 blocks, which is obviously
+  #wrong. however, in forum, they argue store_current() should be overrided in MyPiece
+  #discussion: https://class.coursera.org/proglang-002/forum/thread?thread_id=1836
+  # https://class.coursera.org/proglang-002/forum/search?q=store_current#11-state-query=store_current
   def store_current
+
     locations = @current_block.current_rotation
     displacement = @current_block.position
     (0..3).each{|index| 
